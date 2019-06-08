@@ -1,0 +1,64 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless App that posts What's New On AWS items to a Chime room
+  
+Globals:
+  Function:
+    Timeout: 120
+    Runtime: python3.7
+    Handler: lambda_function.lambda_handler
+  
+Parameters:
+  ChimeBotUrl:
+    Type: AWS::SSM::Parameter::Name
+    Default: "chime.bot.url"
+
+
+Resources:
+  StoreNewItems:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: StoreNewItems/
+      Policies: AmazonDynamoDBFullAccess
+      Events:
+        Every1:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 minute)
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref DynamoDBTable
+
+  SendMessage:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: SendMessage/
+      Policies:
+        - SSMParameterReadPolicy:
+            ParameterName: !Ref ChimeBotUrl
+      Events:
+        Stream:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt DynamoDBTable.StreamArn
+            BatchSize: 100
+            StartingPosition: TRIM_HORIZON
+      Environment:
+        Variables:
+          PARAMETER_NAME: !Ref ChimeBotUrl
+
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    Properties: 
+      AttributeDefinitions: 
+        - AttributeName: guid
+          AttributeType: S
+      KeySchema: 
+        - AttributeName: guid
+          KeyType: HASH
+      ProvisionedThroughput: 
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      StreamSpecification:
+        StreamViewType: NEW_IMAGE
